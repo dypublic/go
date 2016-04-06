@@ -1,9 +1,9 @@
 package main
 
 import (
+	"errors"
 	"net"
 	"os"
-	"errors"
 )
 import "fmt"
 import "bufio"
@@ -15,7 +15,7 @@ func echo(conn net.Conn, log chan string) {
 		message, _ := bufio.NewReader(conn).ReadString('\n') // output message received
 		fmt.Print("Message Received:", string(message))      // sample process for string received
 		log <- message
-		newmessage := strings.ToUpper(message)               // send new string back to client
+		newmessage := strings.ToUpper(message) // send new string back to client
 		conn.Write([]byte(newmessage + "\n"))
 		if message == "exit\n" {
 			break
@@ -37,22 +37,21 @@ func collection(message_chan chan string, err_chan chan error) {
 
 }
 func server() {
-	fmt.Println("Launching server...")  // listen on all interfaces
+	fmt.Println("Launching server...") // listen on all interfaces
 	collec_chan := make(chan string)
 	collec_error_chan := make(chan error)
 	go collection(collec_chan, collec_error_chan)
 	err := errors.New("exit")
-	errfn := func() {collec_error_chan <- err}
+	errfn := func() { collec_error_chan <- err }
 	defer errfn()
 	ln, _ := net.Listen("tcp", ":8081") // accept connection on port
-
 
 	// run loop forever (or until ctrl-c)
 	for {
 		conn, _ := ln.Accept()
 		go echo(conn, collec_chan)
 	}
-	
+
 }
 
 func client() {
@@ -75,12 +74,13 @@ func main() {
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Print("s for server, c for client: ")
 	text, _ := reader.ReadString('\n')
-	fmt.Println(text)
-	if text == "s\n" {
+	choice := strings.TrimSpace(text)
+	fmt.Println(choice)
+	if choice == "s" {
 		server()
-	} else if text == "c\n" {
+	} else if choice == "c" {
 		client()
 	} else {
-		fmt.Println(text)
+		fmt.Println(choice)
 	}
 }
