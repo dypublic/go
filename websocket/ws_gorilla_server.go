@@ -14,6 +14,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"fmt"
+	"os"
 )
 
 var addr = flag.String("addr", "localhost:8080", "http service address")
@@ -33,7 +34,8 @@ func upload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	have_head := false
-
+	var file  *os.File
+	size := 0
 	defer c.Close()
 	for {
 		head := &FileHead{}
@@ -43,18 +45,39 @@ func upload(w http.ResponseWriter, r *http.Request) {
 				fmt.Println("head not correct!")
 				break
 			}
+			if !head.file_name {
+				break
+			}
+			f, ferr := os.OpenFile(head.file_name, os.O_CREATE|os.O_WRONLY, os.ModePerm)
+			if ferr != nil{
+				fmt.Println("create file fail:", ferr)
+				break
+			}
+			file = f
+			have_head = true
 		}
 		mt, message, err := c.ReadMessage()
 		if err != nil {
 			log.Println("read:", err)
 			break
 		}
+		if mt == websocket.BinaryMessage{
+			file.Write(message)
+		}
+
 		log.Printf("recv: %s", message)
-		err = c.WriteMessage(mt, message)
-		if err != nil {
-			log.Println("write:", err)
+		size += len(message)
+		if size >= head.file_size{
+			fmt.Println("recv all bytes")
+			file.Sync()
+			file.Close()
 			break
 		}
+		//err = c.WriteMessage(mt, message)
+		//if err != nil {
+		//	log.Println("write:", err)
+		//	break
+		//}
 	}
 }
 
