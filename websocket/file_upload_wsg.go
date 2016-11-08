@@ -11,11 +11,13 @@ import(
 	"github.com/gorilla/websocket"
 	"io"
 	"sync"
+	"fmt"
+	"encoding/json"
 )
 
 type HeadInfo struct {
-	name string `json:"name"`
-	size int64 `json:"size"`
+	Name string `json:"name"`
+	Size int64 `json:"size"`
 }
 
 func main() {
@@ -23,7 +25,7 @@ func main() {
 	flag.Parse()
 	filename := flag.Arg(0)
 	//filename := os.Args[1]
-	u := url.URL{Scheme:"ws", Host:*addr, Path:"/upload"}
+	u := url.URL{Scheme:"ws", Host: *addr, Path: "/upload"}
 	log.Printf("target addr: %s", u.String())
 
 	//file.
@@ -32,9 +34,12 @@ func main() {
 		log.Println("file info not get, ", err.Error())
 		os.Exit(1)
 	}
-	headinfo := HeadInfo{}
-	headinfo.name = filename
-	headinfo.size = info.Size()
+	headinfo := &HeadInfo{
+					Name: filename,
+					Size: info.Size(),
+	}
+	//headinfo.name = filename
+	//headinfo.size = info.Size()
 
 	file, err := os.Open(filename)
 	if err != nil{
@@ -59,15 +64,20 @@ func main() {
 	go func() {
 
 		ws_conn.WriteJSON(headinfo)
-		var buffer [1024*8]byte
+		b, _ := json.Marshal(headinfo)
+		fmt.Println(headinfo)
+		fmt.Println(b)
+		buffer := make([]byte, 1024*8)
 		file_end := false
 		for !file_end {
-			len, err := reader.Read(buffer[0:0])
+			len, err := reader.Read(buffer)
 			if err == io.EOF{
 				//file_end = true
 				break
 			}else if err != nil {
 				log.Println("read file and get error, ", err.Error())
+			}else {
+				log.Println("read ", len)
 			}
 			piece := buffer[:len]
 			ws_err := ws_conn.WriteMessage(websocket.BinaryMessage, piece)
@@ -82,6 +92,7 @@ func main() {
 				log.Print("user interrupt")
 				break
 			default:
+				//log.Println("no interrupt")
 			}
 		}
 		wg.Done()

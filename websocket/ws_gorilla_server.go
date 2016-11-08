@@ -17,16 +17,17 @@ import (
 	"os"
 )
 
-var addr = flag.String("addr", "localhost:8080", "http service address")
+var addr = flag.String("addr", "0.0.0.0:8080", "http service address")
 
 var upgrader = websocket.Upgrader{} // use default options
 
 type FileHead struct {
-	file_name string `json:"file_name"`
-	file_size int64  `json:"file_size"`
+	File_name string `json:"name"`
+	File_size int64  `json:"size"`
 }
 
 func upload(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("in upload")
 	c, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Print("upgrade:", err)
@@ -34,27 +35,33 @@ func upload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	have_head := false
+	head := FileHead{}
 	var file  *os.File
 	var size int64 = 0
 	defer c.Close()
 	for {
-		head := FileHead{}
+		fmt.Println("in for")
+
 		if !have_head {
 			err := c.ReadJSON(&head)
+			//_, message, err := c.ReadMessage()
+			//fmt.Println(message)
 			if err != nil {
 				fmt.Println("head not correct!")
 				break
 			}
-			if head.file_name == "" {
+			if head.File_name == "" {
+				fmt.Println("head is empty!")
 				break
 			}
-			f, ferr := os.OpenFile(head.file_name, os.O_CREATE | os.O_WRONLY, os.ModePerm)
+			f, ferr := os.OpenFile(head.File_name, os.O_CREATE | os.O_WRONLY, os.ModePerm)
 			if ferr != nil {
 				fmt.Println("create file fail:", ferr)
 				break
 			}
 			file = f
 			have_head = true
+			fmt.Println(head)
 		}
 		mt, message, err := c.ReadMessage()
 		if err != nil {
@@ -67,13 +74,13 @@ func upload(w http.ResponseWriter, r *http.Request) {
 
 			log.Printf("recv: %d", len(message))
 			size += int64(len(message))
-			if size == head.file_size {
+			if size == head.File_size {
 				fmt.Println("recv all bytes")
 				file.Sync()
 				file.Close()
 				break
-			}else if size > head.file_size{
-				fmt.Println("! recv too much, org: ",head.file_size, " now:", size)
+			}else if size > head.File_size{
+				fmt.Println("! recv too much, org: ",head.File_size, " now:", size)
 				file.Close()
 			}
 		}
