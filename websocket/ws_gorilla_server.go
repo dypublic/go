@@ -23,7 +23,7 @@ var upgrader = websocket.Upgrader{} // use default options
 
 type FileHead struct {
 	file_name string `json:"file_name"`
-	file_size int    `json:"file_size"`
+	file_size int64  `json:"file_size"`
 }
 
 func upload(w http.ResponseWriter, r *http.Request) {
@@ -35,21 +35,21 @@ func upload(w http.ResponseWriter, r *http.Request) {
 
 	have_head := false
 	var file  *os.File
-	size := 0
+	var size int64 = 0
 	defer c.Close()
 	for {
-		head := &FileHead{}
+		head := FileHead{}
 		if !have_head {
 			err := c.ReadJSON(&head)
-			if err != nil{
+			if err != nil {
 				fmt.Println("head not correct!")
 				break
 			}
-			if !head.file_name {
+			if head.file_name == "" {
 				break
 			}
-			f, ferr := os.OpenFile(head.file_name, os.O_CREATE|os.O_WRONLY, os.ModePerm)
-			if ferr != nil{
+			f, ferr := os.OpenFile(head.file_name, os.O_CREATE | os.O_WRONLY, os.ModePerm)
+			if ferr != nil {
 				fmt.Println("create file fail:", ferr)
 				break
 			}
@@ -61,17 +61,21 @@ func upload(w http.ResponseWriter, r *http.Request) {
 			log.Println("read:", err)
 			break
 		}
-		if mt == websocket.BinaryMessage{
+		if mt == websocket.BinaryMessage {
 			file.Write(message)
-		}
 
-		log.Printf("recv: %s", message)
-		size += len(message)
-		if size >= head.file_size{
-			fmt.Println("recv all bytes")
-			file.Sync()
-			file.Close()
-			break
+
+			log.Printf("recv: %d", len(message))
+			size += int64(len(message))
+			if size == head.file_size {
+				fmt.Println("recv all bytes")
+				file.Sync()
+				file.Close()
+				break
+			}else if size > head.file_size{
+				fmt.Println("! recv too much, org: ",head.file_size, " now:", size)
+				file.Close()
+			}
 		}
 		//err = c.WriteMessage(mt, message)
 		//if err != nil {
