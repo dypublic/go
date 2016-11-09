@@ -15,6 +15,7 @@ import (
 	"github.com/gorilla/websocket"
 	"fmt"
 	"os"
+	"errors"
 )
 
 var addr = flag.String("addr", "0.0.0.0:8080", "http service address")
@@ -25,6 +26,82 @@ type FileHead struct {
 	File_name string `json:"name"`
 	File_size int64  `json:"size"`
 }
+func get_head(c *websocket.Conn) (FileHead, error){
+	head := FileHead{}
+	err := c.ReadJSON(&head)
+	//_, message, err := c.ReadMessage()
+	//fmt.Println(message)
+	if err != nil {
+		fmt.Println("head not correct!")
+		return head, err
+	}
+	if head.File_name == "" {
+		return head, errors.New("head is empty!")
+	}
+	fmt.Println(head)
+	return head, nil
+}
+
+func recv_done(c *websocket.Conn, file *os.File) error {
+	fmt.Println("recv all bytes")
+	file.Sync()
+	err := c.WriteMessage(websocket.CloseMessage,
+		websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+	if err != nil {
+		log.Println("Send close fail:", err)
+		return err
+	}
+	return nil
+}
+
+func save_file(c *websocket.Conn, head FileHead){
+	file, ferr := os.OpenFile(head.File_name,
+							os.O_CREATE | os.O_WRONLY,
+							os.ModePerm)
+	if ferr != nil {
+		fmt.Println("create file fail:", ferr)
+		return
+	}
+	defer file.Close()
+
+	var save_size int64 = 0
+	for {
+		mt, message, err := c.ReadMessage()
+		if err != nil {
+			log.Println("Recv:", err)
+			break
+		}
+		if mt != websocket.BinaryMessage {
+			log.Println("Not a BinaryMessage, ", mt)
+			break
+		}
+		if len(message) == 0{
+			log.Printf("recv: %d", len(message))
+			err := c.WriteMessage(websocket.CloseMessage,
+				websocket.FormatCloseMessage(
+					websocket.CloseUnsupportedData,
+					"Recv zero byte"))
+			if err != nil {
+				log.Println("write close:", err)
+				break
+			}
+			break
+		}
+		file.Write(message)
+
+		save_size += int64(len(message))
+		if save_size == head.File_size {
+			if err := recv_done(c, file); err != nil{
+				log.Println("error on end, ", err.Error())
+			}
+			break
+		}else if save_size > head.File_size{
+			fmt.Println("! recv too much, org: ",head.File_size, " now:", save_size)
+			break
+		}
+
+	}
+}
 
 func upload(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("in upload")
@@ -34,62 +111,15 @@ func upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	have_head := false
-	head := FileHead{}
-	var file  *os.File
-	var size int64 = 0
 	defer c.Close()
-	for {
-		fmt.Println("in for")
 
-		if !have_head {
-			err := c.ReadJSON(&head)
-			//_, message, err := c.ReadMessage()
-			//fmt.Println(message)
-			if err != nil {
-				fmt.Println("head not correct!")
-				break
-			}
-			if head.File_name == "" {
-				fmt.Println("head is empty!")
-				break
-			}
-			f, ferr := os.OpenFile(head.File_name, os.O_CREATE | os.O_WRONLY, os.ModePerm)
-			if ferr != nil {
-				fmt.Println("create file fail:", ferr)
-				break
-			}
-			file = f
-			have_head = true
-			fmt.Println(head)
-		}
-		mt, message, err := c.ReadMessage()
-		if err != nil {
-			log.Println("read:", err)
-			break
-		}
-		if mt == websocket.BinaryMessage {
-			file.Write(message)
-
-
-			log.Printf("recv: %d", len(message))
-			size += int64(len(message))
-			if size == head.File_size {
-				fmt.Println("recv all bytes")
-				file.Sync()
-				file.Close()
-				break
-			}else if size > head.File_size{
-				fmt.Println("! recv too much, org: ",head.File_size, " now:", size)
-				file.Close()
-			}
-		}
-		//err = c.WriteMessage(mt, message)
-		//if err != nil {
-		//	log.Println("write:", err)
-		//	break
-		//}
+	head, err := get_head(c)
+	if err != nil{
+		log.Println("head error, ", err.Error())
+		return
 	}
+	fmt.Println(head)
+	save_file(c, head)
 }
 
 func echo(w http.ResponseWriter, r *http.Request) {

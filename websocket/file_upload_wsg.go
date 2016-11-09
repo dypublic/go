@@ -9,10 +9,12 @@ import(
 	"os/signal"
 	"bufio"
 	"github.com/gorilla/websocket"
-	"io"
+	//"io"
 	"sync"
 	"fmt"
-	"encoding/json"
+	//"encoding/json"
+	"path"
+	"time"
 )
 
 type HeadInfo struct {
@@ -34,12 +36,11 @@ func main() {
 		log.Println("file info not get, ", err.Error())
 		os.Exit(1)
 	}
+	name := path.Base(filename)
 	headinfo := &HeadInfo{
-					Name: filename,
+					Name: name,
 					Size: info.Size(),
 	}
-	//headinfo.name = filename
-	//headinfo.size = info.Size()
 
 	file, err := os.Open(filename)
 	if err != nil{
@@ -62,41 +63,41 @@ func main() {
 	wg.Add(1)
 
 	go func() {
-
+		defer wg.Done()
 		ws_conn.WriteJSON(headinfo)
-		b, _ := json.Marshal(headinfo)
 		fmt.Println(headinfo)
-		fmt.Println(b)
-		buffer := make([]byte, 1024*8)
-		file_end := false
-		for !file_end {
-			len, err := reader.Read(buffer)
-			if err == io.EOF{
-				//file_end = true
+		//buffer := make([]byte, 1024*8)
+		var buffer [1024*8]byte
+
+SendLoop:
+		for {
+			piece := buffer[:]
+			len, err := reader.Read(piece)
+			if err != nil {
+				log.Println("read error, ", err.Error())
 				break
-			}else if err != nil {
-				log.Println("read file and get error, ", err.Error())
-			}else {
-				log.Println("read ", len)
 			}
-			piece := buffer[:len]
+			piece = buffer[:len]
 			ws_err := ws_conn.WriteMessage(websocket.BinaryMessage, piece)
 			if ws_err != nil{
 				log.Println("ws write error:", ws_err.Error())
 				break
 			}
-
-
 			select {
 			case <- interrupt:
 				log.Print("user interrupt")
-				break
+				ws_err := ws_conn.WriteControl(websocket.CloseMessage,
+					websocket.FormatCloseMessage(websocket.CloseGoingAway,"user cancel"),
+					time.Now().Add(100*time.Millisecond))
+				if ws_err != nil{
+					log.Println("close message send fail", ws_err.Error())
+				}
+				break SendLoop
 			default:
 				//log.Println("no interrupt")
+				//time.Sleep(time.Millisecond * 100)
 			}
 		}
-		wg.Done()
-
 	}()
 
 	wg.Wait()
