@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"os"
 	"errors"
+	"time"
 )
 
 var addr = flag.String("addr", "0.0.0.0:8080", "http service address")
@@ -66,6 +67,7 @@ func check_recv_done(save_size int64, head *FileHead,
 	return false, nil
 }
 func recv_piece(c *websocket.Conn) ([]byte, error) {
+	c.SetReadDeadline(time.After(time.Second))
 	mt, message, err := c.ReadMessage()
 	if err != nil {
 		log.Println("Recv:", err)
