@@ -43,6 +43,7 @@ func get_head(c *websocket.Conn) (FileHead, error){
 }
 
 func recv_done(c *websocket.Conn, file *os.File) error {
+
 	fmt.Println("recv all bytes")
 	file.Sync()
 	err := c.WriteMessage(websocket.CloseMessage,
@@ -54,53 +55,77 @@ func recv_done(c *websocket.Conn, file *os.File) error {
 	return nil
 }
 
-func save_file(c *websocket.Conn, head FileHead){
+func check_recv_done(save_size int64, head *FileHead,
+						c *websocket.Conn, file *os.File) (bool, error) {
+	if save_size == head.File_size {
+		return true, recv_done(c, file)
+	} else if save_size > head.File_size {
+		err_str := fmt.Sprintln("! recv too much, org: ", head.File_size, " now:", save_size)
+		return false, errors.New(err_str)
+	}
+	return false, nil
+}
+func recv_piece(c *websocket.Conn) ([]byte, error) {
+	mt, message, err := c.ReadMessage()
+	if err != nil {
+		log.Println("Recv:", err)
+		return []byte{}, err
+	}
+	if mt != websocket.BinaryMessage {
+		log.Println("Not a BinaryMessage, ", mt)
+		return []byte{}, errors.New("Not a BinaryMessage")
+	}
+	return message, nil
+}
+
+func check_len(len int, c *websocket.Conn) error{
+	if len > 0 {
+		return nil
+	}
+	log.Printf("recv: %d", len)
+	err := c.WriteMessage(websocket.CloseMessage,
+		websocket.FormatCloseMessage(
+			websocket.CloseUnsupportedData,
+			"Recv zero byte"))
+	if err != nil {
+		log.Println("write close:", err)
+		return err
+	}
+	return errors.New("recv wrong length message")
+
+}
+
+func save_file(c *websocket.Conn, head FileHead) error {
 	file, ferr := os.OpenFile(head.File_name,
 							os.O_CREATE | os.O_WRONLY,
 							os.ModePerm)
 	if ferr != nil {
 		fmt.Println("create file fail:", ferr)
-		return
+		return ferr
 	}
 	defer file.Close()
 
 	var save_size int64 = 0
 	for {
-		mt, message, err := c.ReadMessage()
+		message, err := recv_piece(c)
 		if err != nil {
-			log.Println("Recv:", err)
-			break
+			return err
 		}
-		if mt != websocket.BinaryMessage {
-			log.Println("Not a BinaryMessage, ", mt)
-			break
-		}
-		if len(message) == 0{
-			log.Printf("recv: %d", len(message))
-			err := c.WriteMessage(websocket.CloseMessage,
-				websocket.FormatCloseMessage(
-					websocket.CloseUnsupportedData,
-					"Recv zero byte"))
-			if err != nil {
-				log.Println("write close:", err)
-				break
-			}
-			break
+		if err := check_len(len(message), c); err != nil{
+			return err
 		}
 		file.Write(message)
 
 		save_size += int64(len(message))
-		if save_size == head.File_size {
-			if err := recv_done(c, file); err != nil{
-				log.Println("error on end, ", err.Error())
-			}
-			break
-		}else if save_size > head.File_size{
-			fmt.Println("! recv too much, org: ",head.File_size, " now:", save_size)
+		done, err := check_recv_done(save_size, &head, c, file)
+		if err != nil{
+			return err
+		}
+		if done{
 			break
 		}
-
 	}
+	return nil
 }
 
 func upload(w http.ResponseWriter, r *http.Request) {
@@ -118,7 +143,7 @@ func upload(w http.ResponseWriter, r *http.Request) {
 		log.Println("head error, ", err.Error())
 		return
 	}
-	fmt.Println(head)
+	//fmt.Println(head)
 	save_file(c, head)
 }
 
